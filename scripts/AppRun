@@ -32,6 +32,7 @@ MODE=fullscreen
 [ -n "${KAWA_WINDOW:-}" ] && MODE=window
 [ -n "${KAWA_SCALE:-}" ]  && MODE=scale
 SCALE="${KAWA_SCALE:-0.42}"
+MAINPID=$$
 
 die(){ echo "kawa: $*" >&2; command -v zenity >/dev/null && zenity --error --text="$*" 2>/dev/null; exit 1; }
 command -v wine >/dev/null || die "需要 wine（請先安裝：sudo apt install wine）"
@@ -128,5 +129,15 @@ if [ -n "$GW" ] && [ "$have_xdo" = 1 ]; then
 fi
 
 [ -z "$GW" ] && [ "$have_xdo" = 0 ] && echo "kawa: 若出現 CD 視窗請按「いいえ」(No)。"
+
+# fullscreen safety watchdog: a detached child that restores the display mode as soon
+# as THIS launcher process exits — for ANY reason (normal quit, crash, force-kill, even
+# kill -9 where the trap can't run). Keys only on $MAINPID, so it's unambiguous.
+# Idempotent with cleanup(); ~2s worst-case lag.
+if [ "$MODESET" = 1 ] && [ -n "$OUT" ] && [ -n "$ORIGMODE" ]; then
+  ( while kill -0 "$MAINPID" 2>/dev/null; do sleep 2; done
+    xrandr --output "$OUT" --mode "$ORIGMODE" 2>/dev/null ) &
+fi
+
 [ -n "$WPID" ] && wait "$WPID"
 cleanup
