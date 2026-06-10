@@ -1,0 +1,103 @@
+#!/bin/bash
+# AppRun for 河原崎家の一族 XP — Traditional Chinese, Wine, by Claude Code.
+# Uses system Wine. First run builds a dedicated prefix; later runs just launch.
+#   default: fullscreen (engine native, fills the screen, biggest/most readable)
+#   KAWA_WINDOW=1 : keep the small native window instead of going fullscreen
+set -u
+HERE="$(dirname "$(readlink -f "$0")")"
+APP="kawarazaki-no-ichizoku"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/$APP"
+export WINEPREFIX="$DATA/prefix"
+export WINEARCH=win32
+GAME="$WINEPREFIX/drive_c/Kawa"
+export DISPLAY="${DISPLAY:-:0}"
+export LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8          # Japanese engine -> CP932 at runtime
+export WINEDLLOVERRIDES="winmm=n,b;d2d1=n,b;mscoree,mshtml="
+export WINEDEBUG="${WINEDEBUG:-fixme-all,err-all}"
+FULLSCREEN=1; [ "${KAWA_WINDOW:-0}" = 1 ] && FULLSCREEN=0
+
+die(){ echo "kawa: $*" >&2; command -v zenity >/dev/null && zenity --error --text="$*" 2>/dev/null; exit 1; }
+command -v wine >/dev/null || die "需要 wine（請先安裝：sudo apt install wine）"
+
+# ---------- first-run setup ----------
+if [ ! -f "$DATA/.setup-done" ]; then
+  echo "kawa: 首次執行，正在建立遊戲環境（約需 1 分鐘）…"
+  mkdir -p "$DATA"
+  wineboot --init >/dev/null 2>&1; wineserver -w
+  wine reg add 'HKCU\Software\Wine' /v Version /d winxp /f >/dev/null 2>&1
+  for root in HKLM HKCU; do
+    wine reg add "$root\\Software\\elf\\KAWAXP-CD" /v InstExec /d 'C:\Kawa\AI.exe' /f >/dev/null 2>&1
+  done
+  cat > "$DATA/_fonts.reg" <<'REG'
+REGEDIT4
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]
+"MS Shell Dlg"="Noto Sans CJK TC"
+"MS Shell Dlg 2"="Noto Sans CJK TC"
+"MS Sans Serif"="Noto Sans CJK TC"
+"Tahoma"="Noto Sans CJK TC"
+"System"="Noto Sans CJK TC"
+REG
+  wine regedit "$DATA/_fonts.reg" >/dev/null 2>&1; wineserver -w
+  echo "kawa: 複製遊戲資料…"
+  mkdir -p "$WINEPREFIX/drive_c"
+  cp -a "$HERE/game/Kawa" "$GAME"
+  cp -f "$HERE/game/MSGothic-TC.otf" "$WINEPREFIX/drive_c/windows/Fonts/msgothic.otf"
+  touch "$DATA/.setup-done"
+  echo "kawa: 環境建立完成。"
+fi
+
+# remember the display mode so we can restore it if the engine's fullscreen
+# switch doesn't get cleaned up.
+OUT="$(xrandr 2>/dev/null | awk '/ connected primary/{print $1; exit} / connected/{print $1; exit}')"
+ORIGMODE="$(xrandr 2>/dev/null | awk '/\*/{print $1; exit}')"
+restore_mode(){ [ -n "${OUT:-}" ] && [ -n "${ORIGMODE:-}" ] && xrandr --output "$OUT" --mode "$ORIGMODE" 2>/dev/null; }
+trap 'restore_mode' EXIT INT TERM
+
+find_dialog(){ xdotool search --class ai.exe 2>/dev/null | while read -r w; do [ "$(xdotool getwindowname "$w" 2>/dev/null)" = AI ] && echo "$w"; done | head -1; }
+find_game(){ for w in $(xdotool search --class ai.exe 2>/dev/null); do eval "$(xdotool getwindowgeometry --shell "$w" 2>/dev/null)"; [ "$(xdotool getwindowname "$w" 2>/dev/null)" != "Default IME" ] && [ "${WIDTH:-0}" -ge 600 ] && { echo "$w"; return; }; done; }
+find_popup(){ xdotool search --class ai.exe 2>/dev/null | while read -r w; do nm=$(xdotool getwindowname "$w" 2>/dev/null); eval "$(xdotool getwindowgeometry --shell "$w" 2>/dev/null)"; [ "$nm" != "Default IME" ] && [ "$nm" != "河原崎家の一族" ] && [ "${WIDTH:-0}" -gt 40 ] && [ "${WIDTH:-0}" -lt 300 ] && echo "$w"; done | head -1; }
+
+cd "$GAME" || die "找不到遊戲資料：$GAME"
+have_xdo=0; command -v xdotool >/dev/null && have_xdo=1
+
+# ---------- launch with retry (engine is single-instance; flaky cold start) ----------
+GW=""; WPID=""
+for attempt in 1 2 3 4 5; do
+  wineserver -k 2>/dev/null; sleep 1
+  wine AI.exe >"$DATA/run.log" 2>&1 &
+  WPID=$!
+  for i in $(seq 1 18); do
+    sleep 0.8
+    kill -0 "$WPID" 2>/dev/null || break        # silent quit -> retry
+    if [ "$have_xdo" = 1 ]; then
+      d=$(find_dialog)
+      if [ -n "$d" ]; then                       # CD prompt -> click いいえ (run from HD)
+        eval "$(xdotool getwindowgeometry --shell "$d" 2>/dev/null)"
+        xdotool mousemove --window "$d" $((WIDTH*73/100)) $((HEIGHT*82/100)) 2>/dev/null
+        xdotool click --window "$d" 1 2>/dev/null
+      fi
+    fi
+    GW=$(find_game); [ -n "$GW" ] && break
+  done
+  [ -n "$GW" ] && break
+  kill -9 "$WPID" 2>/dev/null; WPID=""
+done
+
+if [ -z "$GW" ]; then
+  [ "$have_xdo" = 0 ] && echo "kawa: 若出現 CD 視窗請按「いいえ」(No)。"
+else
+  # ---------- go fullscreen via the ウィンドウ -> ウィンドウ最大化 menu ----------
+  if [ "$FULLSCREEN" = 1 ] && [ "$have_xdo" = 1 ]; then
+    sleep 1
+    for try in 1 2 3; do
+      xdotool mousemove --window "$GW" 90 7 click 1 2>/dev/null; sleep 1
+      POP=$(find_popup)
+      if [ -n "$POP" ]; then xdotool mousemove --window "$POP" 60 33 click 1 2>/dev/null; sleep 1; fi
+      m=$(xrandr 2>/dev/null | awk '/\*/{print $1; exit}')
+      [ "$m" != "$ORIGMODE" ] && break          # display mode changed -> fullscreen active
+    done
+  fi
+fi
+
+[ -n "$WPID" ] && wait "$WPID"
+restore_mode

@@ -1,0 +1,23 @@
+# 不含遊戲檔 / no game data or copyrighted binaries
+*.rar
+*.iso
+*.bin
+*.cue
+*.ARC
+*.AWF
+*.AppImage
+*.zip
+*.otf
+*.ttf
+*.ttc
+*.dll
+*.exe
+# build artifacts
+AppDir/
+prefix/
+_disc_probe/
+Kawa*/
+# localization patch sources (game-derived)
+汉化补丁*/
+免CD补丁/
+全CG存档/
