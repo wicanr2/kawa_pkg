@@ -2,16 +2,18 @@
 # AppRun for 河原崎家の一族 XP — Traditional Chinese, Wine, by Claude Code.
 # Uses system Wine. First run builds a dedicated prefix; later runs just launch.
 #
-# Display: native 640x480 window by default. The in-game font is enlarged ~1.49x
-# (see build_font.py) so the native window is readable without scaling.
+# Display modes:
+#   (default)      FULLSCREEN — switch the monitor to 640x480 via `xrandr --mode`
+#                  so the game fills the whole screen (panel upscales). This is what
+#                  the engine's「最大化」does internally, but driven by us via xrandr
+#                  (reliable: GNOME/mutter honours a real --mode switch; it only
+#                  ignores --scale). Restored to the original mode on exit.
+#   KAWA_WINDOW=1  native 640x480 window (no mode switch). Font is enlarged ~1.49x
+#                  so the window is readable.
+#   KAWA_SCALE=x   legacy xrandr --scale (ignored by mutter; only for other WMs).
 #
-# True magnified fullscreen is NOT reliable on GNOME/mutter X11 + Wine 11:
-#   - the engine's「ウィンドウ最大化」(DirectDraw exclusive 640x480) is broken under
-#     Wine 11 here — mutter reverts the modeset and the window vanishes;
-#   - `xrandr --scale` is ignored by mutter (no visual scaling);
-#   so the clean solution is gamescope (not packaged on Ubuntu 22.04 — needs install).
-# KAWA_SCALE=0.42  best-effort xrandr nearest scaling (works only on non-mutter WMs;
-#                  must be >= 0.42 or the 499px-tall window gets clipped).
+# PULSE_DISABLE_SHM=1 is exported to avoid a PulseAudio memfd/realloc heap crash that
+# otherwise kills the engine sporadically (looked like "maximize stopped working").
 set -u
 HERE="$(dirname "$(readlink -f "$0")")"
 APP="kawarazaki-no-ichizoku"
@@ -23,14 +25,17 @@ export DISPLAY="${DISPLAY:-:0}"
 export LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8          # Japanese engine -> CP932 at runtime
 export WINEDLLOVERRIDES="winmm=n,b;d2d1=n,b;mscoree,mshtml="
 export WINEDEBUG="${WINEDEBUG:-fixme-all,err-all}"
+export PULSE_DISABLE_SHM=1                           # avoid pulseaudio memfd/realloc crash
 
 # ---------- pick display mode ----------
-MODE=window
-[ -n "${KAWA_SCALE:-}" ] && MODE=scale
+MODE=fullscreen
+[ -n "${KAWA_WINDOW:-}" ] && MODE=window
+[ -n "${KAWA_SCALE:-}" ]  && MODE=scale
 SCALE="${KAWA_SCALE:-0.42}"
 
 die(){ echo "kawa: $*" >&2; command -v zenity >/dev/null && zenity --error --text="$*" 2>/dev/null; exit 1; }
 command -v wine >/dev/null || die "需要 wine（請先安裝：sudo apt install wine）"
+have_xdo=0; command -v xdotool >/dev/null && have_xdo=1
 
 # ---------- first-run setup ----------
 if [ ! -f "$DATA/.setup-done" ]; then
@@ -62,25 +67,31 @@ REG
   echo "kawa: 環境建立完成。"
 fi
 
-# ---------- remember display mode; restore on exit (handles both fullscreen + scale) ----------
+# ---------- display: remember mode, restore on exit ----------
 OUT="$(xrandr 2>/dev/null | awk '/ connected primary/{print $1; exit} / connected/{print $1; exit}')"
 ORIGMODE="$(xrandr 2>/dev/null | awk '/\*/{print $1; exit}')"
-SCALED=0
+GAMEMODE="$(xrandr 2>/dev/null | grep -oE '\b640x480\b' | head -1)"
+SCALED=0; MODESET=0
 cleanup(){
   [ "$SCALED" = 1 ] && [ -n "${OUT:-}" ] && xrandr --output "$OUT" --scale 1x1 --filter bilinear 2>/dev/null; SCALED=0
-  [ -n "${OUT:-}" ] && [ -n "${ORIGMODE:-}" ] && xrandr --output "$OUT" --mode "$ORIGMODE" 2>/dev/null
+  [ "$MODESET" = 1 ] && [ -n "${OUT:-}" ] && [ -n "${ORIGMODE:-}" ] && xrandr --output "$OUT" --mode "$ORIGMODE" 2>/dev/null; MODESET=0
 }
 trap 'cleanup' EXIT INT TERM
-if [ "$MODE" = scale ] && command -v xrandr >/dev/null && [ -n "$OUT" ]; then
-  xrandr --output "$OUT" --scale "${SCALE}x${SCALE}" --filter nearest 2>/dev/null && SCALED=1   # crisp nearest
+
+# fullscreen needs a 640x480 mode + xrandr + xdotool; otherwise fall back to a window
+if [ "$MODE" = fullscreen ] && { [ -z "$GAMEMODE" ] || [ -z "$OUT" ] || [ "$have_xdo" = 0 ]; }; then
+  MODE=window
+fi
+if [ "$MODE" = fullscreen ]; then
+  xrandr --output "$OUT" --mode 640x480 2>/dev/null && MODESET=1   # monitor upscales -> fullscreen
+elif [ "$MODE" = scale ] && command -v xrandr >/dev/null && [ -n "$OUT" ]; then
+  xrandr --output "$OUT" --scale "${SCALE}x${SCALE}" --filter nearest 2>/dev/null && SCALED=1
 fi
 
 find_dialog(){ xdotool search --class ai.exe 2>/dev/null | while read -r w; do [ "$(xdotool getwindowname "$w" 2>/dev/null)" = AI ] && echo "$w"; done | head -1; }
 find_game(){ for w in $(xdotool search --class ai.exe 2>/dev/null); do eval "$(xdotool getwindowgeometry --shell "$w" 2>/dev/null)"; [ "$(xdotool getwindowname "$w" 2>/dev/null)" != "Default IME" ] && [ "${WIDTH:-0}" -ge 600 ] && { echo "$w"; return; }; done; }
-find_popup(){ xdotool search --class ai.exe 2>/dev/null | while read -r w; do nm=$(xdotool getwindowname "$w" 2>/dev/null); eval "$(xdotool getwindowgeometry --shell "$w" 2>/dev/null)"; [ "$nm" != "Default IME" ] && [ "$nm" != "河原崎家の一族" ] && [ "${WIDTH:-0}" -gt 40 ] && [ "${WIDTH:-0}" -lt 300 ] && echo "$w"; done | head -1; }
 
 cd "$GAME" || die "找不到遊戲資料：$GAME"
-have_xdo=0; command -v xdotool >/dev/null && have_xdo=1
 
 # ---------- launch with retry (engine is single-instance; flaky cold start) ----------
 GW=""; WPID=""
@@ -105,13 +116,15 @@ for attempt in 1 2 3 4 5; do
   kill -9 "$WPID" 2>/dev/null; WPID=""
 done
 
-# NOTE: the engine's「ウィンドウ最大化」is intentionally NOT auto-triggered — under
-# Wine 11 + GNOME/mutter it fails to get exclusive 640x480 and the window vanishes.
-
-# centre the game window in the (scaled) desktop if we can
-if [ -n "$GW" ] && [ "$have_xdo" = 1 ] && [ "$SCALED" = 1 ]; then
-  eval "$(xdotool getdisplaygeometry --shell 2>/dev/null)"
-  xdotool windowmove "$GW" $(( (${WIDTH:-960}-640)/2 )) $(( (${HEIGHT:-600}-500)/2 )) 2>/dev/null
+# ---------- place the game window ----------
+if [ -n "$GW" ] && [ "$have_xdo" = 1 ]; then
+  if [ "$MODE" = fullscreen ]; then
+    xdotool windowmove "$GW" 0 -19 2>/dev/null      # push the 19px menu bar off the top -> canvas fills 640x480
+    xdotool windowactivate --sync "$GW" 2>/dev/null
+  elif [ "$SCALED" = 1 ]; then
+    eval "$(xdotool getdisplaygeometry --shell 2>/dev/null)"
+    xdotool windowmove "$GW" $(( (${WIDTH:-960}-640)/2 )) $(( (${HEIGHT:-600}-500)/2 )) 2>/dev/null
+  fi
 fi
 
 [ -z "$GW" ] && [ "$have_xdo" = 0 ] && echo "kawa: 若出現 CD 視窗請按「いいえ」(No)。"
