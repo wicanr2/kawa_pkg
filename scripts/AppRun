@@ -45,6 +45,9 @@ REGEDIT4
 "System"="Noto Sans CJK TC"
 REG
   wine regedit "$DATA/_fonts.reg" >/dev/null 2>&1; wineserver -w
+  # render text WITHOUT anti-aliasing -> crisp pixel font at the game's native size
+  wine reg add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d 0 /f >/dev/null 2>&1
+  wine reg add 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d 0 /f >/dev/null 2>&1
   echo "kawa: 複製遊戲資料…"
   mkdir -p "$WINEPREFIX/drive_c"
   cp -a "$HERE/game/Kawa" "$GAME"
