@@ -15,10 +15,13 @@ export DISPLAY="${DISPLAY:-:0}"
 export LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8          # Japanese engine -> CP932 at runtime
 export WINEDLLOVERRIDES="winmm=n,b;d2d1=n,b;mscoree,mshtml="
 export WINEDEBUG="${WINEDEBUG:-fixme-all,err-all}"
-# display scale factor: framebuffer height = 1200*SCALE must stay >= the 640x500
-# game window, so the practical max is ~0.41 (0.42 ≈ 2.4x ≈ 填滿螢幕). Smaller = bigger.
+# By default DO NOT touch the display — just run the game in its native window.
+# Optional crisp scaling ONLY if the user explicitly sets KAWA_SCALE
+# (e.g. KAWA_SCALE=0.42 ≈ 2.4x nearest; framebuffer height 1200*SCALE must stay
+# >= the 640x500 window, so ~0.41 is the practical max). Reverts on exit.
+SCALE_ON=0
+[ -n "${KAWA_SCALE:-}" ] && SCALE_ON=1
 SCALE="${KAWA_SCALE:-0.42}"
-SCALE_ON=1; [ "${KAWA_NOSCALE:-0}" = 1 ] && SCALE_ON=0
 
 die(){ echo "kawa: $*" >&2; command -v zenity >/dev/null && zenity --error --text="$*" 2>/dev/null; exit 1; }
 command -v wine >/dev/null || die "需要 wine（請先安裝：sudo apt install wine）"
