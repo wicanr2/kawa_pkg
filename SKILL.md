@@ -73,22 +73,24 @@ Droid/UMing… 同字級字框幾乎一樣，差 <2%）——但 **字型的 `wi
 （這是先做的、效果最好的一步）。要再更大才需要整桌面縮放：
 `gamescope`（能做視窗 nearest 縮放）在 Ubuntu 22.04 裝不起來（apt/snap 都沒有、要自己編）。
 
-**AppRun 預設＝不動螢幕**（使用者最後要求「不要放大螢幕」），遊戲就跑原生 640×480 視窗（小）。
-放大是**選用**：設 `KAWA_SCALE` 才會用 `xrandr --output <OUT> --scale SxS --filter nearest`
-（nearest = 銳利不糊）整桌面放大，結束/中斷 `--scale 1x1` 還原（trap EXIT/INT/TERM）。
-- 例：`KAWA_SCALE=0.42`（≈2.4x，幾乎填滿、清晰）。
-- **下限約 0.41**：framebuffer 高 = 1200×SCALE 必須 ≥ 視窗 500px，否則字幕框底部被切。
-- 缺點：xrandr scale 會放大**整個桌面**（使用者不喜歡，故不設成預設）；要乾淨的單視窗縮放需 gamescope（裝不起來）。
+**字體大小/銳利度**：字小是先天（引擎固定 cell）。最有效的一步是上面的 metrics 收緊（~1.49×）。
+再把字渲染成**無反鋸齒的銳利點陣**：first-run 設 `HKCU\Control Panel\Desktop` `FontSmoothing=0`
+（REG_SZ）、`FontSmoothingType=0`（DWORD），GDI 以 1-bit 渲染 → 清晰像素字。AppRun 已內建。
 
-**字體大小/銳利度**：字小是先天（引擎固定 cell，字型已填滿 cell；換字型/字級無法變大）。
-若不放大螢幕又嫌「糊」，把字渲染成**無反鋸齒的銳利點陣**：first-run 設
-`HKCU\Control Panel\Desktop` `FontSmoothing=0`（REG_SZ）、`FontSmoothingType=0`（DWORD），
-GDI 就以 1-bit 渲染 → 原生 ~16px 的清晰像素字（接近原版 16×16 點陣字感）。AppRun 已內建。
+### ⚠️ 全螢幕在 GNOME/mutter X11 + Wine 11 上沒有可靠解（2026-06-11 實測）
 
-引擎自帶全螢幕（會糊、~3x）：選單「ウィンドウ」→「ウィンドウ最大化」
-（DirectDraw 切 640×480 exclusive、面板 bilinear 放大；wine 結束自動還原）。
-xdotool 自動：點選單列 x≈90 開「ウィンドウ」→ 點彈出選單第 2 項「最大化」。
-（使用者比較過：要清楚就 nearest 縮放，要更大就全螢幕但糊；最後選 nearest 縮放。）
+三條路都死，**AppRun 預設改回原生視窗、不自動最大化**（靠 1.49× 大字補可讀性）：
+1. **引擎「ウィンドウ最大化」壞了**：點下去視窗**直接消失**（wine11 拿不到 DirectDraw exclusive
+   640×480；mutter 把 app 發起的 modeset 還原）。**千萬別自動點它**，比不點更糟（會 regression）。
+   舊版 AppRun(commit 3687640) 用 xdotool 點選單「ウィンドウ」(視窗 x≈90,y7)→ 彈窗第 2 項「最大化」
+   並偵測 xrandr mode 變了當成功——那套在**舊 wine** 有效，wine11 已失效。
+2. **`xrandr --scale 0.42` 被 mutter 忽略**：framebuffer 雖變 807×504（getdisplaygeometry 看得到），
+   但畫面仍 1:1 不縮放。故 `KAWA_SCALE` 只在**非 mutter 桌面**有效（保留為選用，下限 0.42 否則 499px 視窗被切）。
+3. **`Xephyr -fullscreen` 不縮放**：小 nested 螢幕只 1:1 貼左上、其餘填 root 底色（純色測試會被底色騙以為填滿了）。
+   能在 nested Xephyr 跑遊戲**不干擾使用者桌面**做離線驗證，但給不了放大。
+
+→ 乾淨的全螢幕**只能靠 gamescope**（會做 nearest/整數縮放），但 Ubuntu 22.04 apt/snap 都沒有、需自編或 flatpak（要 sudo）。裝好後再把 `gamescope -f -- wine AI.exe` wire 進 AppRun。
+⚠️ `pkill -f 'Xephyr'`/`'AI.exe'` 會匹配到自己的指令列自殺(exit 144)，用 `pkill -x Xephyr`。
 
 ## GUI 自動化小技巧（在被遮擋的桌面上）
 
