@@ -21,3 +21,5 @@ Kawa*/
 汉化补丁*/
 免CD补丁/
 全CG存档/
+__pycache__/
+*.pyc
