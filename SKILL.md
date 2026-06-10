@@ -99,6 +99,27 @@ xdotool 自動：點選單列 x≈90 開「ウィンドウ」→ 點彈出選單
   Windows 上 hook 會正確載入遊戲目錄的全形檔名字型 → 直接顯示繁體 Bold。
   ⚠️ 只能在 Linux/wine 組裝驗證遊戲邏輯，**無法在真 Windows 測**，需使用者實測。
 
+## UI 圖中文化（選單/按鈕）＋ .gcc 圖檔格式
+
+UI 文字（指令選單/標題選單/存讀檔/CG 鑑賞等）是燒在 `gcc.ARC` 的圖片裡（不是字串），
+elf 專有「G24n/G24m」格式。已逆向完成，見 `scripts/gcc_codec.py`：
+- `gcc.ARC` = 跟 mes.ARC 同 TOC（count + 40-byte records）；裡面是 `.gcc` 圖。
+- `.gcc`：12-byte header（sig G24n/G24m、OffsetX@4、OffsetY@6、W@8、H@10），
+  色彩資料從 0x14(G24n)/0x20(G24m) 起，**LZSS**(4KB ring, init 0xFEE, LSB ctrl, bit=1=literal,
+  off=((hi&0xF0)<<4)|lo, cnt=(hi&0xF)+3) 壓的 **BGR24、上下顛倒**。
+- **G24m 有 alpha mask** 接在色彩後；header **0x0C = 色彩壓縮長度**。重編時：色彩用
+  all-literal LZSS 重壓（W*H*3 % 8 == 0 故乾淨）+ **原樣接回 alpha bytes** + **更新 0x0C**。不必重編 alpha。
+- 編輯法：解碼成 RGB → 找按鈕格（多狀態 sprite sheet：黑/青/紅 bg 或金色漸層）→ **逐列取樣 bg 色擦掉日文**
+  （漸層安全）→ 用 Noto Sans CJK TC Bold 置中畫繁中（白字或自動對比色）→ 重編 → repack。
+- 已做：menu(指令選單)、title_pt(標題)、r_menu(右鍵金色選單)、cg_pt(CG)、sl_save/sl_load。
+  未做（量大/低頻）：setting(設定滑桿)、soundk_pt(~20 BGM 曲名)、edk_pt、backlog。
+- 上方 Win32 menu bar（ゲームの終了/ウィンドウ…）字串找不到（packed/engine），未解。
+
+## 抽全部對話成文字（`scripts/extract_dialogue.py`）
+
+mes.ARC 每個 .MES 找 SJIS 雙位元組 run → 用字型 glyph 名稱 uniXXXX 還原**顯示字**（簡體）→
+OpenCC `s2tw` 再 `jp2t`（清掉日文新字体如 満→滿、経→經、説→說）→ 依 .MES 分段輸出 `對話紀錄_繁中.txt`。
+
 ## 重新製作的順序
 
 1. `unrar x <rar>`：取得 BIN/CUE、`汉化补丁 GPT3.5/`、`免CD补丁/`、`全CG存档/`。
