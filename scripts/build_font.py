@@ -30,11 +30,20 @@ for C,g in bc.items():
     CtoD[C]=D; CtoT[C]=conv(D)
 print(f"bundled codepoints: {len(CtoT)}")
 
+# extra gaiji codepoints for choice-translation chars not in the 漢化 set
+# (mes.ARC choices are encoded with these; see scripts/patch_choices.py)
+import json, os as _os
+EXTRAS={}
+_ef=_os.environ.get('KAWA_FONT_EXTRAS','/tmp/font_extras.json')
+if _os.path.exists(_ef): EXTRAS={int(k):v for k,v in json.load(open(_ef)).items()}
+print(f"extras: {len(EXTRAS)} gaiji mappings")
+
 # 2) subset Noto TC to needed target unicodes
 noto=TTCollection(NOTO).fonts[3]   # Noto Sans CJK TC
 target=set()
 for C in CtoT:
     target.add(ord(CtoT[C])); target.add(ord(CtoD[C]))
+for cp,ch in EXTRAS.items(): target.add(ord(ch))
 opts=Options(); opts.glyph_names=True; opts.notdef_outline=True; opts.name_IDs=['*']; opts.name_legacy=True; opts.recalc_bounds=True; opts.drop_tables=[]
 ss=Subsetter(options=opts); ss.populate(unicodes=target); ss.subset(noto)
 ncmap=noto.getBestCmap()
@@ -46,7 +55,11 @@ for C,T in CtoT.items():
     gn=ncmap.get(ord(T)) or ncmap.get(ord(CtoD[C]))
     if gn: newmap[C]=gn
     else: miss+=1
-print(f"mapped {len(newmap)} codepoints, {miss} unmapped")
+for cp,ch in EXTRAS.items():
+    gn=ncmap.get(ord(ch))
+    if gn: newmap[cp]=gn
+    else: print("WARN extra char not subset:",ch)
+print(f"mapped {len(newmap)} codepoints (+{len(EXTRAS)} gaiji), {miss} unmapped")
 
 # 4) replace cmap
 cmap=newTable('cmap'); cmap.tableVersion=0
